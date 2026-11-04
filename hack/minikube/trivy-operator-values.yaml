@@ -1,0 +1,40 @@
+# trivy-operator settings for the end-to-end test
+excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system,secobserve-operator,gcs-emulator"
+operator:
+  vulnerabilityScannerEnabled: true
+  sbomGenerationEnabled: true
+  # re-scan every hour, to test the throttling of unchanged images (MIN_RESYNC_SECONDS)
+  scannerReportTTL: "1h"
+  scanJobsConcurrentLimit: 3
+  scanJobTimeout: 20m
+  builtInTrivyServer: true   # ClientServer mode: the vulnerability DB is downloaded once
+  # only vulnerability scanning is needed for this test
+  configAuditScannerEnabled: false
+  rbacAssessmentScannerEnabled: false
+  infraAssessmentScannerEnabled: false
+  clusterComplianceEnabled: false
+  exposedSecretScannerEnabled: false
+trivy:
+  ignoreUnfixed: false
+  # default 5m0s is too short for bigger images when several scan jobs share a node
+  timeout: 15m0s
+  # the default limit (500M) gets scan jobs of larger images OOMKilled (vaultwarden, php-cli, ...)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256M
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  # Debian images that keep build dependencies (official php:*, vaultwarden, ...) contain linux-libc-dev with ~8000
+  # kernel CVEs. Their VulnerabilityReport (~45 MB) exceeds the 3 MiB Kubernetes object limit, so the Trivy Operator
+  # fails with "Request entity too large" and writes NO report for the whole pod (also not the SbomReport).
+  # The package only ships kernel headers; containers run on the node's kernel -> ignore it.
+  ignorePolicy: |
+    package trivy
+
+    import rego.v1
+
+    default ignore := false
+
+    ignore if input.PkgName == "linux-libc-dev"

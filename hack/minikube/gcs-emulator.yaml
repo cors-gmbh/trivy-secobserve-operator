@@ -1,0 +1,41 @@
+# Local GCS emulator (fake-gcs-server) so the real google-cloud-storage code path runs without Google access.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gcs-emulator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-gcs
+  namespace: gcs-emulator
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fake-gcs}}
+  template:
+    metadata: {labels: {app: fake-gcs}}
+    spec:
+      initContainers:
+        - name: create-bucket   # every directory below -data becomes a bucket
+          image: busybox:1.37.0
+          command: ["sh", "-c", "mkdir -p /data/trivy-e2e && echo ok > /data/trivy-e2e/.keep"]
+          volumeMounts: [{name: data, mountPath: /data}]
+      containers:
+        - name: fake-gcs
+          image: fsouza/fake-gcs-server:1.52.2
+          args: ["-scheme", "http", "-port", "4443", "-data", "/data", "-backend", "memory",
+                 "-public-host", "fake-gcs.gcs-emulator.svc.cluster.local:4443"]
+          ports: [{containerPort: 4443}]
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-gcs
+  namespace: gcs-emulator
+spec:
+  selector: {app: fake-gcs}
+  ports: [{port: 4443, targetPort: 4443}]

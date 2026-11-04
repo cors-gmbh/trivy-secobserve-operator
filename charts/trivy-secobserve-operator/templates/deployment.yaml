@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tso.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tso.labels" . | nindent 4 }}
+spec:
+  replicas: 1  # kopf runs --standalone: exactly one instance
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tso.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tso.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "tso.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: SECOBSERVE_API_URL
+              value: {{ .Values.secobserve.apiUrl | quote }}
+            - name: SECOBSERVE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tso.secretName" . }}
+                  key: api-token
+            - name: SECOBSERVE_VERIFY_SSL
+              value: {{ .Values.secobserve.verifySsl | quote }}
+            - name: SECOBSERVE_TIMEOUT_SECONDS
+              value: {{ .Values.secobserve.timeoutSeconds | quote }}
+            - name: CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            - name: PRODUCT_NAME_TEMPLATE
+              value: {{ .Values.mapping.productNameTemplate | quote }}
+            - name: PRODUCT_GROUP
+              value: {{ .Values.mapping.productGroup | quote }}
+            - name: PRODUCT_AUTO_CREATE
+              value: {{ .Values.mapping.productAutoCreate | quote }}
+            - name: SERVICE_NAME_TEMPLATE
+              value: {{ .Values.mapping.serviceNameTemplate | quote }}
+            - name: BRANCH_NAME_TEMPLATE
+              value: {{ .Values.mapping.branchNameTemplate | quote }}
+            - name: REQUIRE_NAMESPACE_LABEL
+              value: {{ .Values.mapping.requireNamespaceLabel | quote }}
+            - name: EXCLUDE_NAMESPACES
+              value: {{ .Values.mapping.excludeNamespaces | quote }}
+            - name: NAMESPACE_RULES
+              value: {{ .Values.mapping.namespaceRules | toJson | quote }}
+            - name: SUPPRESS_LICENSES
+              value: {{ .Values.mapping.suppressLicenses | quote }}
+            - name: MIN_RESYNC_SECONDS
+              value: {{ .Values.processing.minResyncSeconds | quote }}
+            - name: SBOM_WAIT_SECONDS
+              value: {{ .Values.processing.sbomWaitSeconds | quote }}
+            - name: REMOVAL_GRACE_SECONDS
+              value: {{ .Values.processing.removalGraceSeconds | quote }}
+            - name: WORKER_TICK_SECONDS
+              value: {{ .Values.processing.workerTickSeconds | quote }}
+            - name: MAX_BACKOFF_SECONDS
+              value: {{ .Values.processing.maxBackoffSeconds | quote }}
+            - name: GCS_BUCKET
+              value: {{ .Values.storage.gcsBucket | quote }}
+            - name: GCS_PREFIX
+              value: {{ .Values.storage.gcsPrefix | quote }}
+            - name: RECONCILE_ENABLED
+              value: {{ .Values.reconcile.enabled | quote }}
+            - name: RECONCILE_INTERVAL_SECONDS
+              value: {{ .Values.reconcile.intervalSeconds | quote }}
+            - name: RECONCILE_GRACE_SECONDS
+              value: {{ .Values.reconcile.gracePeriodSeconds | quote }}
+            - name: RECONCILE_STARTUP_DELAY_SECONDS
+              value: {{ .Values.reconcile.startupDelaySeconds | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: health
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

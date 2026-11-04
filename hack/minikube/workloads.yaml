@@ -1,0 +1,273 @@
+# Deliberately outdated / vulnerable images as scan targets for the e2e test.
+# No Services, no Ingress, no exposed ports: nothing here is reachable from outside the minikube node.
+# ---------------------------------------------------------------------------------------------------------
+# shop-prod: mapped via annotations to an existing SecObserve product group (rules + license policy apply)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop-prod
+  labels:
+    secobserve.io/enabled: "true"
+  annotations:
+    secobserve.io/product: "E2E Shop Prod"
+    secobserve.io/product-group: "Pimcore Installationen"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop-prod
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec:
+      containers:   # multi-container pod: nginx + php-fpm (PHP 8.1.28 < 8.1.29, before the CVE-2024-4577 fix)
+        - name: nginx
+          image: nginx:1.21.0
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+        - name: php
+          image: php:8.1.28-fpm
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drupal
+  namespace: shop-prod
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: drupal}}
+  template:
+    metadata: {labels: {app: drupal}}
+    spec:
+      containers:   # PHP application with composer vendor dir (symfony, twig, guzzle, ...)
+        - name: drupal
+          image: drupal:9.1.0-apache
+          resources: {requests: {cpu: 10m, memory: 32Mi}}
+---
+# Two CronJobs with the same image: must be uploaded only once (dedupe)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: import-a
+  namespace: shop-prod
+spec:
+  schedule: "0 3 * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: php:8.1.28-cli
+              command: ["php", "-v"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: import-b
+  namespace: shop-prod
+spec:
+  schedule: "0 4 * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: php:8.1.28-cli
+              command: ["php", "-v"]
+---
+# ---------------------------------------------------------------------------------------------------------
+# node-app: no annotations -> default mapping (product = namespace name)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: node-app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: node-app
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: api}}
+  template:
+    metadata: {labels: {app: api}}
+    spec:
+      containers:
+        - name: node
+          image: node:16.14.0-alpine
+          command: ["sleep", "infinity"]
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rust-tools
+  annotations:
+    secobserve.io/product: "E2E Rust Tools"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vaultwarden
+  namespace: rust-tools
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: vaultwarden}}
+  template:
+    metadata: {labels: {app: vaultwarden}}
+    spec:
+      containers:
+        - name: vaultwarden
+          image: vaultwarden/server:1.30.0
+          resources: {requests: {cpu: 10m, memory: 32Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: go-edge
+  annotations:
+    secobserve.io/product: "E2E Go Edge"
+    secobserve.io/branch: "prod"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traefik
+  namespace: go-edge
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: traefik}}
+  template:
+    metadata: {labels: {app: traefik}}
+    spec:
+      containers:
+        - name: traefik
+          image: traefik:v2.9.1
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: go-edge
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: nginx}}
+  template:
+    metadata: {labels: {app: nginx}}
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21.0
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: python-ml
+  annotations:
+    secobserve.io/product: "E2E Python ML"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: python-ml
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: worker}}
+  template:
+    metadata: {labels: {app: worker}}
+    spec:
+      containers:
+        - name: python
+          image: python:3.9.0-slim
+          command: ["sleep", "infinity"]
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: java-legacy
+  annotations:
+    secobserve.io/product: "E2E Java Legacy"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tomcat
+  namespace: java-legacy
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: tomcat}}
+  template:
+    metadata: {labels: {app: tomcat}}
+    spec:
+      containers:
+        - name: tomcat
+          image: tomcat:9.0.50
+          resources: {requests: {cpu: 10m, memory: 64Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ruby-app
+  annotations:
+    secobserve.io/product: "E2E Ruby App"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: ruby-app
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: app}}
+  template:
+    metadata: {labels: {app: app}}
+    spec:
+      containers:
+        - name: ruby
+          image: ruby:2.7.0-slim
+          command: ["sleep", "infinity"]
+          resources: {requests: {cpu: 10m, memory: 16Mi}}
+---
+# ---------------------------------------------------------------------------------------------------------
+# opted-out: must NOT show up in SecObserve
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opted-out
+  labels:
+    secobserve.io/enabled: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: opted-out
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: redis}}
+  template:
+    metadata: {labels: {app: redis}}
+    spec:
+      containers:
+        - name: redis
+          image: redis:6.0.0
+          resources: {requests: {cpu: 10m, memory: 16Mi}}

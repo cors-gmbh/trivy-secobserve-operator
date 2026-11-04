@@ -1,0 +1,42 @@
+# Helm values for running the operator INSIDE minikube (phase B of the e2e test).
+# The API token is passed with --set secobserve.apiToken=... (not stored here).
+image:
+  repository: trivy-secobserve-operator
+  tag: dev
+  pullPolicy: Never   # loaded with `minikube image load`
+
+secobserve:
+  # the local SecObserve on the host (Traefik on port 8090, routed by host name)
+  apiUrl: "http://secobserve-backend.localhost:8090/api"
+  verifySsl: false
+
+hostAliases:
+  - ip: "0.250.250.254"   # host.minikube.internal (OrbStack)
+    hostnames: ["secobserve-backend.localhost"]
+
+clusterName: minikube-e2e
+
+mapping:
+  excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system,gcs-emulator,secobserve-operator"
+
+processing:
+  minResyncSeconds: 1800
+  sbomWaitSeconds: 60
+
+storage:
+  gcsBucket: trivy-e2e
+  gcsPrefix: trivy-secobserve
+
+extraEnv:
+  - name: STORAGE_EMULATOR_HOST
+    value: "http://fake-gcs.gcs-emulator.svc.cluster.local:4443"
+  - name: GOOGLE_CLOUD_PROJECT
+    value: "e2e"
+
+reconcile:
+  enabled: true
+  intervalSeconds: 120
+  gracePeriodSeconds: 300
+  startupDelaySeconds: 120
+
+logLevel: INFO

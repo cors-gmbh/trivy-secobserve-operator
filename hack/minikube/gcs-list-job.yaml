@@ -1,0 +1,20 @@
+# Lists the objects the operator stored in the GCS emulator (read the result with `k8s.py logs gcs-emulator job-name=gcs-list`).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gcs-list
+  namespace: gcs-emulator
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: curl
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - >-
+              curl -sf "http://fake-gcs.gcs-emulator.svc.cluster.local:4443/storage/v1/b/trivy-e2e/o?fields=items(name,size,contentType)"

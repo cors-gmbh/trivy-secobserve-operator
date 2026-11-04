@@ -1,0 +1,100 @@
+image:
+  repository: ghcr.io/cors-gmbh/trivy-secobserve-operator
+  tag: ""  # defaults to the chart appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+secobserve:
+  # Base URL of the SecObserve API, including /api
+  apiUrl: "https://secobserve-backend.example.com/api"
+  verifySsl: true
+  timeoutSeconds: 300
+  # API token of a SecObserve user that may create products and import observations.
+  apiToken: ""
+  # Or use an existing secret with the key "api-token".
+  existingSecret: ""
+
+# Name of this cluster, used in SecObserve (Kubernetes cluster field), in the upload file names and in the
+# storage path. Use a distinct name per cluster when several clusters report to the same SecObserve.
+clusterName: "default"
+
+mapping:
+  # Placeholders: cluster, namespace, registry, repository, image_name, tag, digest, container,
+  # resource_kind, resource_name. Namespace annotations override product / group / branch:
+  #   secobserve.io/product, secobserve.io/product-group, secobserve.io/branch
+  productNameTemplate: "{namespace}"
+  productGroup: ""
+  productAutoCreate: true
+  serviceNameTemplate: "{image_name}"
+  branchNameTemplate: ""
+  # Only handle namespaces labelled secobserve.io/enabled=true (or annotated with secobserve.io/product).
+  requireNamespaceLabel: false
+  excludeNamespaces: "kube-system,kube-public,kube-node-lease,trivy-system"
+  # Central mapping for groups of namespaces (first match wins; annotations still override). "match" is a regex on
+  # the whole namespace name; product/branch are templates like above; unset fields use the defaults above.
+  #   - match: "argocd|cert-manager|ingress-nginx|monitoring|trivy-system"
+  #     productGroup: "CORS Infrastruktur"
+  #   - match: "(.*)-staging"
+  #     branch: "staging"
+  namespaceRules: []
+  suppressLicenses: false
+
+processing:
+  minResyncSeconds: 21600   # re-upload an unchanged image after a re-scan at most every 6h
+  sbomWaitSeconds: 120      # wait this long for the SbomReport before uploading without dependency graph
+  # A service combines several images and the report of one of them is deleted: wait this long before uploading
+  # without it (Trivy Operator re-scans delete the report and create it again a few minutes later).
+  removalGraceSeconds: 900
+  workerTickSeconds: 5
+  maxBackoffSeconds: 1800
+
+storage:
+  # Store every generated CycloneDX file in GCS (needs Workload Identity / a GSA with storage.objectCreator).
+  gcsBucket: ""
+  gcsPrefix: "trivy-secobserve"
+
+reconcile:
+  # Resolve the findings of services that are not running anymore (after gracePeriodSeconds).
+  enabled: false
+  intervalSeconds: 3600
+  gracePeriodSeconds: 7200
+  startupDelaySeconds: 600
+
+logLevel: INFO
+
+serviceAccount:
+  create: true
+  name: ""
+  # e.g. iam.gke.io/gcp-service-account: trivy-secobserve@PROJECT.iam.gserviceaccount.com
+  annotations: {}
+
+# e.g. to reach a SecObserve that is only resolvable via a fixed IP
+hostAliases: []
+
+podAnnotations: {}
+
+extraEnv: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
