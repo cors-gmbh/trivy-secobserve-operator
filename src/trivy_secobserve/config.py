@@ -102,6 +102,8 @@ class Settings:
     sbom_wait_seconds: int = 120
     removal_grace_seconds: int = 900
     worker_tick_seconds: int = 5
+    # initial listing of the reports in pages of this size instead of all at once (0 = no paging)
+    watch_chunk_size: int = 10
     max_backoff_seconds: int = 1800
     # --- Storage ---
     gcs_bucket: str = ""
@@ -143,6 +145,7 @@ class Settings:
             sbom_wait_seconds=_int("SBOM_WAIT_SECONDS", 120),
             removal_grace_seconds=_int("REMOVAL_GRACE_SECONDS", 900),
             worker_tick_seconds=_int("WORKER_TICK_SECONDS", 5),
+            watch_chunk_size=_int("WATCH_CHUNK_SIZE", 10),
             max_backoff_seconds=_int("MAX_BACKOFF_SECONDS", 1800),
             gcs_bucket=os.getenv("GCS_BUCKET", ""),
             gcs_prefix=os.getenv("GCS_PREFIX", "trivy-secobserve").strip("/"),

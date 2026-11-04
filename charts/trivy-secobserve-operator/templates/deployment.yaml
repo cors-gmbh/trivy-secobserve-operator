@@ -79,6 +79,8 @@ spec:
               value: {{ .Values.processing.removalGraceSeconds | quote }}
             - name: WORKER_TICK_SECONDS
               value: {{ .Values.processing.workerTickSeconds | quote }}
+            - name: WATCH_CHUNK_SIZE
+              value: {{ .Values.processing.watchChunkSize | quote }}
             - name: MAX_BACKOFF_SECONDS
               value: {{ .Values.processing.maxBackoffSeconds | quote }}
             - name: GCS_BUCKET

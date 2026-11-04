@@ -104,6 +104,13 @@ async def startup(settings: kopf.OperatorSettings, memo: kopf.Memo, **_: Any) ->
     settings.watching.connect_timeout = 60
     settings.watching.server_timeout = 600
     settings.watching.client_timeout = 610
+    # The initial listing fetches every VulnerabilityReport and SbomReport of the cluster. Without paging it is one
+    # response with all full objects (up to 3 MiB each), which got the operator OOMKilled at 4Gi on a real cluster.
+    settings.watching.chunk_size = config.watch_chunk_size or None
+    # kopf keeps a worker per object, holding its last body, until the object was idle that long (default 5 s): during
+    # the initial listing that is every report at once. The handlers are cheap, there is nothing to wait for.
+    # Measured with 300 reports of 0.6 MB: no paging 1618 MiB, paging 25 672 MiB, paging 10 + idle 0.5 s 276 MiB.
+    settings.batching.idle_timeout = 0.5
 
     client = SecObserveClient(
         config.secobserve_api_url,

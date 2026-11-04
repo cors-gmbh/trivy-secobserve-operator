@@ -105,6 +105,7 @@ metadata:
 | `SBOM_WAIT_SECONDS` | `120` | |
 | `REMOVAL_GRACE_SECONDS` | `900` | one image of a combined service is gone: wait for it to come back (re-scan) |
 | `WORKER_TICK_SECONDS` / `MAX_BACKOFF_SECONDS` | `5` / `1800` | |
+| `WATCH_CHUNK_SIZE` | `10` | initial listing of the reports in pages of this size; `0` lists everything at once (one huge response) |
 | `GCS_BUCKET` / `GCS_PREFIX` | – / `trivy-secobserve` | `gs://<bucket>/<prefix>/<cluster>/<namespace>/<service>/<digest>/<timestamp>-<content-hash>.cdx.json`, append-only |
 | `LOCAL_STORAGE_DIR` | – | same layout on a local disk (tests) |
 | `RECONCILE_ENABLED` / `RECONCILE_INTERVAL_SECONDS` / `RECONCILE_GRACE_SECONDS` / `RECONCILE_STARTUP_DELAY_SECONDS` | `false` / `3600` / `7200` / `600` | |

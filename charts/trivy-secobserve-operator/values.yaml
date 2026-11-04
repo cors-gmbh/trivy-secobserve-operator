@@ -47,6 +47,8 @@ processing:
   # without it (Trivy Operator re-scans delete the report and create it again a few minutes later).
   removalGraceSeconds: 900
   workerTickSeconds: 5
+  # initial listing of the reports in pages of this size (0 = everything at once, needs a lot of memory)
+  watchChunkSize: 10
   maxBackoffSeconds: 1800
 
 storage:
