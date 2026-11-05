@@ -262,13 +262,14 @@ class Processor:
         self.resolved_keys.discard(target.key)
 
         now = self.clock()
+        selected = select_refs(list(state.refs.values()))
         if force or not state.last_upload:
             state.dirty = True
             state.force = state.force or force
-        elif ref not in select_refs(list(state.refs.values())):
+        elif _images(selected) != state.last_images:
+            state.dirty = True  # new image version, or an image dropped out (workload moved to another image)
+        elif ref not in selected:
             pass  # e.g. the report of an old ReplicaSet, or a duplicate of an image that is already uploaded
-        elif ref.image not in state.last_images:
-            state.dirty = True  # new image version
         elif ref.update_ts > state.last_update_ts and now - state.last_upload >= self.settings.min_resync_seconds:
             state.dirty = True
 

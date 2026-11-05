@@ -446,6 +446,31 @@ def test_rolling_update_in_a_combined_service_is_not_delayed(env):
     assert processor.snapshot()[0]["last_images"] == ["sha256:cli", "sha256:fpm-new"]
 
 
+def test_image_dropping_out_of_a_combined_service_is_uploaded_without_delay(env):
+    """The CronJob moves to the image the Deployment already runs: its old image is gone from the service. That is
+    not a re-scan of an unchanged image and must not wait for MIN_RESYNC_SECONDS."""
+    processor, source, client, clock, _ = env
+    _, (cli_vr, _) = _fpm_and_cli(processor, source)
+    assert [r.status for r in processor.run_once()] == ["uploaded"]
+    assert processor.snapshot()[0]["last_images"] == ["sha256:cli", "sha256:fpm"]
+
+    clock.now += 60
+    feed(
+        processor,
+        source,
+        *_php(
+            cli_vr["metadata"]["name"],
+            ("CronJob", "import-a"),
+            "job",
+            "8.1.28-fpm",
+            "sha256:fpm",
+            "2026-11-03T11:00:00Z",
+        ),
+    )
+    assert [r.status for r in processor.run_once()] == ["uploaded"]
+    assert processor.snapshot()[0]["last_images"] == ["sha256:fpm"]
+
+
 def test_rolling_update_with_real_replicaset_names(env):
     processor, source, client, clock, _ = env
     old = ("ReplicaSet", "web-5d4f8b9c7")
