@@ -1,6 +1,6 @@
 [project]
 name = "trivy-secobserve-operator"
-version = "0.1.2"
+version = "0.1.3"
 description = "Kubernetes operator that forwards Trivy Operator reports (VulnerabilityReport + SbomReport) as CycloneDX to SecObserve and optionally stores them in GCS."
 readme = "README.md"
 requires-python = ">=3.12"

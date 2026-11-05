@@ -2,5 +2,5 @@ apiVersion: v2
 name: trivy-secobserve-operator
 description: Forwards Trivy Operator VulnerabilityReports + SbomReports as CycloneDX to SecObserve (and optionally GCS).
 type: application
-version: 0.1.2
-appVersion: "0.1.2"
+version: 0.1.3
+appVersion: "0.1.3"
