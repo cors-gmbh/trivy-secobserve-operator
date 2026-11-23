@@ -114,6 +114,13 @@ class Settings:
     reconcile_interval_seconds: int = 3600
     reconcile_grace_seconds: int = 7200
     reconcile_startup_delay_seconds: int = 600
+    # --- CVEs of PHP itself from php.net's CVE records (NVD API), see php_advisories.py ---
+    php_advisories_enabled: bool = True
+    php_advisories_interval_seconds: int = 3600
+    # after a start, uploads of services with PHP wait this long for the first load (then go without)
+    php_advisories_startup_wait_seconds: int = 300
+    nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    nvd_api_key: str = field(default="", repr=False)
     # --- Misc ---
     log_level: str = "INFO"
 
@@ -154,6 +161,11 @@ class Settings:
             reconcile_interval_seconds=_int("RECONCILE_INTERVAL_SECONDS", 3600),
             reconcile_grace_seconds=_int("RECONCILE_GRACE_SECONDS", 7200),
             reconcile_startup_delay_seconds=_int("RECONCILE_STARTUP_DELAY_SECONDS", 600),
+            php_advisories_enabled=_bool("PHP_ADVISORIES_ENABLED", True),
+            php_advisories_interval_seconds=_int("PHP_ADVISORIES_INTERVAL_SECONDS", 3600),
+            php_advisories_startup_wait_seconds=_int("PHP_ADVISORIES_STARTUP_WAIT_SECONDS", 300),
+            nvd_api_url=os.getenv("NVD_API_URL", "https://services.nvd.nist.gov/rest/json/cves/2.0"),
+            nvd_api_key=os.getenv("NVD_API_KEY", ""),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
 

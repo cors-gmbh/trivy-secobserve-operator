@@ -63,6 +63,17 @@ reconcile:
   gracePeriodSeconds: 7200
   startupDelaySeconds: 600
 
+phpAdvisories:
+  # CVEs of PHP itself (pkg:bitnami/php from the image SBOM) straight from php.net's CVE records via the NVD API,
+  # instead of only via the Bitnami DB (days later). Needs egress to services.nvd.nist.gov.
+  enabled: true
+  intervalSeconds: 3600
+  # after a start, uploads of services with PHP wait this long for the first load (then go without)
+  startupWaitSeconds: 300
+  nvdApiUrl: "https://services.nvd.nist.gov/rest/json/cves/2.0"
+  # optional NVD API key (higher rate limit); or key "nvd-api-key" in secobserve.existingSecret
+  nvdApiKey: ""
+
 logLevel: INFO
 
 serviceAccount:

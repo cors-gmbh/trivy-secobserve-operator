@@ -23,6 +23,7 @@ Trivy Operator ──► VulnerabilityReport ┐
 
 * kopf watches `vulnerabilityreports`, `sbomreports` (aquasecurity.github.io/v1alpha1) and `namespaces`.
   The handlers only maintain an in-memory index; **the operator never writes to the cluster** (read-only RBAC).
+* CVEs of PHP itself are added from php.net's CVE records (NVD API), see [PHP advisories](#php-advisories).
 * A single worker fetches the reports fresh from the API, merges them (join on the package URL), stores the
   CycloneDX file and uploads it to `POST /api/import/file_upload_observations_by_name/`.
 * One SecObserve **vulnerability check per (product, branch, service)**, with a stable file name
@@ -109,7 +110,35 @@ metadata:
 | `GCS_BUCKET` / `GCS_PREFIX` | – / `trivy-secobserve` | `gs://<bucket>/<prefix>/<cluster>/<namespace>/<service>/<digest>/<timestamp>-<content-hash>.cdx.json`, append-only |
 | `LOCAL_STORAGE_DIR` | – | same layout on a local disk (tests) |
 | `RECONCILE_ENABLED` / `RECONCILE_INTERVAL_SECONDS` / `RECONCILE_GRACE_SECONDS` / `RECONCILE_STARTUP_DELAY_SECONDS` | `false` / `3600` / `7200` / `600` | |
+| `PHP_ADVISORIES_ENABLED` / `PHP_ADVISORIES_INTERVAL_SECONDS` | `true` / `3600` | CVEs of PHP itself from php.net's CVE records, see [PHP advisories](#php-advisories) |
+| `PHP_ADVISORIES_STARTUP_WAIT_SECONDS` | `300` | after a start, uploads of services with PHP wait this long for the first load |
+| `NVD_API_URL` / `NVD_API_KEY` | NVD API 2.0 / – | the key is optional (higher rate limit), chart: `phpAdvisories.nvdApiKey` or key `nvd-api-key` in the existing secret |
 | `LOG_LEVEL` | `INFO` | |
+
+## PHP advisories
+
+Trivy matches the PHP runtime (`pkg:bitnami/php` from the SBOM in the image, see [Limitations](#limitations)) against
+the Bitnami vulnerability DB. Bitnami adds new PHP CVEs by hand, so far 1 to 6 days after php.net published them
+(the 17 CVEs of 2026-11-19 were still missing four days later). php.net, as CNA, writes the affected version ranges
+into the CVE record right away, and the NVD API serves them about half an hour later, long before the NVD's own
+analysis.
+
+So the operator loads all CVE records of `security@php.net` from the NVD API every hour (one request, ~120 records),
+takes the version ranges of PHP itself from php.net's data plus the NVD's CPE ranges once there are any, and adds the
+matching CVEs of every `pkg:bitnami/php` component to the CycloneDX document, with CVSS v4 score and vector, the
+fixed version as recommendation and php.net's advisory links. CVEs that Trivy reports already are left to Trivy;
+when Bitnami catches up, the finding stays the same in SecObserve (same CVE, same component).
+
+* New or changed CVEs upload the affected services again right away (not only after `MIN_RESYNC_SECONDS`).
+* After a start, uploads of services with PHP wait up to `PHP_ADVISORIES_STARTUP_WAIT_SECONDS` for the first load,
+  so that a restart does not resolve and re-open their PHP findings. If the NVD API is down, the last loaded
+  advisories stay in use.
+* Backports (`pkg:bitnami/php@8.1.34?backport=CVE-…`) are reported like Trivy does; a SecObserve rule on the purl
+  marks them.
+* `trivy-secobserve replay` uses them, too (`PHP_ADVISORIES_ENABLED=false` to leave them out);
+  `trivy-secobserve convert --php-advisories` adds them to a single conversion.
+* Matches the PHP releases exactly like Grype's CPE matching (checked for 8.2.30, 8.3.20, 8.4.10, 8.4.27), plus
+  end-of-life branches that php.net counts as affected ("before 8.2.36" includes 8.1).
 
 ## Requirements on the Trivy Operator side
 
@@ -205,6 +234,7 @@ kubeconfig and refuse to talk to anything but a local cluster.
   ```
   With it, Trivy reports PHP2Shell for 8.1.34 and 8.3.31 and nothing for 8.3.36. `pkg:generic/php` is ignored by
   Trivy. PHP installed via `apk` (`php83`, ...) is matched against the Alpine secdb and works without this.
+  The Bitnami DB lags behind php.net by days; the [PHP advisories](#php-advisories) close that gap.
 
 ## License
 

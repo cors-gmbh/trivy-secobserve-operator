@@ -15,6 +15,7 @@ from kubernetes.client.rest import ApiException
 
 from .config import Settings
 from .mapping import validate_templates
+from .php_advisories import PhpAdvisoryFeed
 from .processor import Processor
 from .secobserve import SecObserveClient, SecObserveError
 from .storage import build_storage
@@ -85,6 +86,19 @@ async def _reconcile_loop(processor: Processor, settings: Settings) -> None:
         await asyncio.sleep(settings.reconcile_interval_seconds)
 
 
+async def _php_advisories_loop(processor: Processor, feed: PhpAdvisoryFeed, settings: Settings) -> None:
+    while True:
+        try:
+            if await asyncio.to_thread(feed.refresh):
+                processor.php_advisories_changed()
+            delay = settings.php_advisories_interval_seconds
+        except Exception as exc:  # noqa: BLE001 - keep the previous advisories, try again
+            logger.warning("Loading the PHP advisories from %s failed: %s", settings.nvd_api_url, exc)
+            # not loaded yet: uploads of services with PHP wait for it, so try again soon
+            delay = settings.php_advisories_interval_seconds if feed.loaded else 60
+        await asyncio.sleep(delay)
+
+
 @kopf.on.startup()
 async def startup(settings: kopf.OperatorSettings, memo: kopf.Memo, **_: Any) -> None:
     config = Settings.from_env()
@@ -118,9 +132,16 @@ async def startup(settings: kopf.OperatorSettings, memo: kopf.Memo, **_: Any) ->
         verify_ssl=config.secobserve_verify_ssl,
         timeout=config.secobserve_timeout_seconds,
     )
-    processor = Processor(config, client, build_storage(config), KubernetesReportSource())
+    php_feed = (
+        PhpAdvisoryFeed(api_url=config.nvd_api_url, api_key=config.nvd_api_key)
+        if config.php_advisories_enabled
+        else None
+    )
+    processor = Processor(config, client, build_storage(config), KubernetesReportSource(), php_feed=php_feed)
     memo.processor = processor
     memo.tasks = [asyncio.create_task(_worker_loop(processor, config))]
+    if php_feed is not None:
+        memo.tasks.append(asyncio.create_task(_php_advisories_loop(processor, php_feed, config)))
     if config.reconcile_enabled:
         memo.tasks.append(asyncio.create_task(_reconcile_loop(processor, config)))
     logger.info("trivy-secobserve-operator started: %s", config)

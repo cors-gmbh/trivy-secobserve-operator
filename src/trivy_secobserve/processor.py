@@ -23,8 +23,9 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from .config import Settings
-from .converter import combine, empty_bom, merge
+from .converter import add_php_advisories, combine, empty_bom, merge, php_components
 from .mapping import Target, image_from_report, resolve_target, template_values, upload_filename
+from .php_advisories import PhpAdvisoryFeed, parse_version
 from .secobserve import SecObserveClient
 from .storage import Storage, content_hash, object_path
 
@@ -116,6 +117,8 @@ class TargetState:
     last_sbom_used: bool = False
     last_error: str = ""
     last_archive_error: str = ""
+    # php.net CVE ids per PHP version in the last upload (PHP_ADVISORIES), to re-upload when they change
+    last_php: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # workloads whose report vanished while other images of the service remain (and since when)
     gone: dict[tuple[str, str, str], float] = field(default_factory=dict)
 
@@ -150,12 +153,15 @@ class Processor:
         storage: Storage,
         source: ReportSource,
         clock: Callable[[], float] = time.time,
+        php_feed: PhpAdvisoryFeed | None = None,
     ) -> None:
         self.settings = settings
         self.client = client
         self.storage = storage
         self.source = source
         self.clock = clock
+        self.php_feed = php_feed
+        self.started = clock()
         self._lock = threading.RLock()
         self.targets: dict[tuple[str, str, str], TargetState] = {}
         self.ref_target: dict[str, tuple[str, str, str]] = {}
@@ -334,6 +340,7 @@ class Processor:
 
         try:
             parts, stored = [], []
+            php_signatures: dict[str, tuple[str, ...]] = {}
             for ref in selected:
                 vulnerability_report = self.source.get_vulnerability_report(ref.namespace, ref.name)
                 if vulnerability_report is None:
@@ -357,6 +364,15 @@ class Processor:
                         "trivy-secobserve:report": ref.name,
                     },
                 )
+                if self.php_feed is not None:
+                    if not self.php_feed.loaded and php_components(bom):
+                        waited = self.clock() - self.started
+                        if waited < self.settings.php_advisories_startup_wait_seconds:
+                            # without them the PHP findings would be resolved now and re-opened a minute later
+                            with self._lock:
+                                state.next_attempt = self.clock() + 30
+                            return ProcessResult(target, "postponed", "waiting for the PHP advisories")
+                    php_signatures.update(add_php_advisories(bom, self.php_feed))
                 # The archive keeps one document per image and scan (path contains digest and content hash).
                 timestamp = ref.update_ts or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
                 path = object_path(self.settings, ref.namespace, target, image, timestamp, content_hash(bom))
@@ -374,6 +390,7 @@ class Processor:
                     ", ".join(p[2].name_tag for p in parts),
                 )
             bom, stats = combine([(p[0], p[1]) for p in parts])
+            stats.vulnerabilities = len(bom["vulnerabilities"])  # including the PHP advisories
             data = json.dumps(bom, separators=(",", ":")).encode()
 
             self.client.ensure_product(target.product, target.product_group, self.settings.product_auto_create)
@@ -405,6 +422,7 @@ class Processor:
             state.last_update_ts = max(ref.update_ts for ref in selected)
             state.last_upload = self.clock()
             state.last_sbom_used = stats.sbom_used
+            state.last_php = php_signatures
         logger.info(
             "Uploaded %s (%s) -> product '%s' service '%s': %s vulnerabilities (%s exact, %s fuzzy, %s unmatched), "
             "sbom=%s, result=%s, stored=%s",
@@ -421,6 +439,23 @@ class Processor:
             location,
         )
         return ProcessResult(target, "uploaded", response=response, location=location)
+
+    def php_advisories_changed(self) -> list[tuple[str, str, str]]:
+        """After a refresh of the PHP advisories: re-upload the services whose PHP versions got other CVEs."""
+        if self.php_feed is None:
+            return []
+        due = []
+        with self._lock:
+            for key, state in self.targets.items():
+                for version, ids in state.last_php.items():
+                    parsed = parse_version(version)
+                    if parsed is not None and self.php_feed.signature_for(parsed) != ids:
+                        state.dirty = state.force = True
+                        due.append(key)
+                        break
+        if due:
+            logger.info("PHP advisories changed: %s services with PHP are uploaded again", len(due))
+        return due
 
     def _archive(self, path: str, data: bytes, state: TargetState) -> str | None:
         """Archive one document. A broken archive (bucket, permissions) must not stop the uploads to SecObserve."""
@@ -501,6 +536,7 @@ class Processor:
                     "waiting_for": sorted(f"{kind}/{name}" for kind, name, _ in s.gone),
                     "last_error": s.last_error,
                     "last_archive_error": s.last_archive_error,
+                    "php_versions": sorted(s.last_php),
                 }
                 for s in self.targets.values()
             ]
