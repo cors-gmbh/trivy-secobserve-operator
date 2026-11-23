@@ -95,6 +95,20 @@ spec:
               value: {{ .Values.reconcile.gracePeriodSeconds | quote }}
             - name: RECONCILE_STARTUP_DELAY_SECONDS
               value: {{ .Values.reconcile.startupDelaySeconds | quote }}
+            - name: PHP_ADVISORIES_ENABLED
+              value: {{ .Values.phpAdvisories.enabled | quote }}
+            - name: PHP_ADVISORIES_INTERVAL_SECONDS
+              value: {{ .Values.phpAdvisories.intervalSeconds | quote }}
+            - name: PHP_ADVISORIES_STARTUP_WAIT_SECONDS
+              value: {{ .Values.phpAdvisories.startupWaitSeconds | quote }}
+            - name: NVD_API_URL
+              value: {{ .Values.phpAdvisories.nvdApiUrl | quote }}
+            - name: NVD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tso.secretName" . }}
+                  key: nvd-api-key
+                  optional: true
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
             {{- with .Values.extraEnv }}

@@ -1,6 +1,6 @@
 """Command line tools that work without a cluster.
 
-  trivy-secobserve convert --vulnerability-report vr.json [--sbom-report sbom.json] [-o out.cdx.json]
+  trivy-secobserve convert --vulnerability-report vr.json [--sbom-report sbom.json] [--php-advisories] [-o out.cdx.json]
   trivy-secobserve replay --vulnerability-reports vrs.json [--sbom-reports sboms.json] [--namespace-annotation k=v]
 
 `replay` feeds exported reports (`kubectl get vulnerabilityreports -o json` lists) through the same processor
@@ -18,8 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
-from .converter import merge
+from .converter import add_php_advisories, merge
 from .mapping import validate_templates
+from .php_advisories import PhpAdvisoryFeed
 from .processor import Processor
 from .secobserve import SecObserveClient
 from .storage import build_storage
@@ -76,6 +77,12 @@ def cmd_convert(args: argparse.Namespace) -> int:
     if len(vrs) > 1 or len(sboms) > 1:
         raise SystemExit("Input contains several reports, select one with --name")
     bom, stats = merge(vrs[0] if vrs else None, sboms[0] if sboms else None)
+    if args.php_advisories:
+        settings = Settings.from_env()
+        feed = PhpAdvisoryFeed(api_url=settings.nvd_api_url, api_key=settings.nvd_api_key)
+        feed.refresh()
+        add_php_advisories(bom, feed)
+        stats.vulnerabilities = len(bom["vulnerabilities"])
     output = json.dumps(bom, indent=2)
     if args.output:
         Path(args.output).write_text(output)
@@ -102,7 +109,11 @@ def cmd_replay(args: argparse.Namespace) -> int:
         verify_ssl=settings.secobserve_verify_ssl,
         timeout=settings.secobserve_timeout_seconds,
     )
-    processor = Processor(settings, client, build_storage(settings), source)
+    php_feed = None
+    if settings.php_advisories_enabled:  # like the operator, or the upload would resolve the PHP findings
+        php_feed = PhpAdvisoryFeed(api_url=settings.nvd_api_url, api_key=settings.nvd_api_key)
+        php_feed.refresh()
+    processor = Processor(settings, client, build_storage(settings), source, php_feed=php_feed)
     for report in source.vulnerability_reports.values():
         processor.observe_vulnerability_report("ADDED", report)
     results = processor.run_once()
@@ -132,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     convert.add_argument("--vulnerability-report")
     convert.add_argument("--sbom-report")
     convert.add_argument("--name", help="Report name, if the input files are lists")
+    convert.add_argument(
+        "--php-advisories", action="store_true", help="Add the php.net CVEs of PHP itself (fetched from the NVD API)"
+    )
     convert.add_argument("-o", "--output")
     convert.set_defaults(func=cmd_convert)
 

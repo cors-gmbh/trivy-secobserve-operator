@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .mapping import ImageRef, image_from_report
+from .php_advisories import Advisory, PhpAdvisoryFeed, Version, php_version_of
 
 SEVERITIES = {
     "CRITICAL": "critical",
@@ -260,6 +261,86 @@ def merge(
     stats.vulnerabilities = len(vulnerabilities)
     stats.components = index.count
     return bom, stats
+
+
+def _walk_components(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    found = []
+    for component in components or []:
+        found.append(component)
+        found.extend(_walk_components(component.get("components") or []))
+    return found
+
+
+def php_components(bom: dict[str, Any]) -> list[tuple[dict[str, Any], Version]]:
+    """The PHP runtime components (pkg:bitnami/php) of a BOM with their versions."""
+    root = bom.get("metadata", {}).get("component")
+    found = []
+    for component in _walk_components([root] if root else []) + _walk_components(bom.get("components") or []):
+        version = php_version_of(component)
+        if version is not None and component.get("bom-ref"):
+            found.append((component, version))
+    return found
+
+
+def _php_advisory_entry(advisory: Advisory, component: dict[str, Any], version: Version) -> dict[str, Any]:
+    installed = ".".join(map(str, version))
+    ratings: list[dict[str, Any]] = []
+    for rating in advisory.ratings:
+        entry: dict[str, Any] = {
+            "source": {"name": "php.net", "url": f"https://nvd.nist.gov/vuln/detail/{advisory.id}"},
+            "score": rating.score,
+            "severity": rating.severity if rating.severity in SEVERITIES.values() else "unknown",
+            "method": rating.method,
+        }
+        if rating.vector:
+            entry["vector"] = rating.vector
+        ratings.append(entry)
+    if not ratings:
+        ratings.append({"source": {"name": "php.net"}, "severity": "unknown", "method": "other"})
+    nvd_url = f"https://nvd.nist.gov/vuln/detail/{advisory.id}"
+    entry = {
+        "id": advisory.id,
+        "source": {"name": "NVD", "url": nvd_url},
+        "description": advisory.description,
+        "ratings": ratings,
+        "advisories": [{"url": url} for url in dict.fromkeys([nvd_url, *advisory.references])],
+        "affects": [{"ref": component["bom-ref"]}],
+        "properties": [
+            {"name": "trivy-secobserve:source", "value": "php.net CVE record (NVD API)"},
+            {"name": "aquasecurity:trivy:InstalledVersion", "value": installed},
+        ],
+    }
+    fixed = advisory.fixed_for(version)
+    if fixed:
+        entry["recommendation"] = f"Upgrade php from {installed} to {fixed}"
+    if advisory.published:
+        entry["published"] = advisory.published
+    if advisory.updated:
+        entry["updated"] = advisory.updated
+    return entry
+
+
+def add_php_advisories(bom: dict[str, Any], feed: PhpAdvisoryFeed) -> dict[str, tuple[str, ...]]:
+    """Add the php.net CVEs of the PHP runtime components to a merged BOM, unless Trivy reports them already.
+
+    Returns the matched CVE ids per PHP version (also those Trivy reports), to tell when a re-upload is due.
+    """
+    vulnerabilities = bom.setdefault("vulnerabilities", [])
+    reported = {
+        (v.get("id", ""), affected.get("ref", "")) for v in vulnerabilities for affected in v.get("affects") or []
+    }
+    signatures: dict[str, tuple[str, ...]] = {}
+    for component, version in php_components(bom):
+        advisories = feed.match(version)
+        signatures[".".join(map(str, version))] = tuple(a.id for a in advisories)
+        for advisory in advisories:
+            if (advisory.id, component["bom-ref"]) in reported:
+                continue
+            reported.add((advisory.id, component["bom-ref"]))
+            vulnerabilities.append(_php_advisory_entry(advisory, component, version))
+    for position, vulnerability in enumerate(vulnerabilities):
+        vulnerability["bom-ref"] = f"trivy-operator-vuln-{position}"
+    return signatures
 
 
 def combine(parts: list[tuple[dict[str, Any], ConversionStats]]) -> tuple[dict[str, Any], ConversionStats]:
