@@ -66,6 +66,21 @@ mapping:
       productGroup: "CORS Infrastruktur"
 ```
 
+Named groups of the `match` regex are additional template fields for `product` and `branch` of that rule, e.g. to
+put the namespaces of one project into one product with one branch per environment (`shop-prod` and `shop-staging`
+→ product `shop`, branches `prod` and `staging`):
+
+```yaml
+mapping:
+  namespaceRules:
+    - match: "(?P<project>.+)-(?P<env>prod|staging)"
+      product: "{project}"
+      branch: "{env}"
+```
+
+Group names are lowercase (`[a-z_][a-z0-9_]*`) and must not shadow a template field; an optional group that did not
+match is empty.
+
 Precedence: namespace annotation > first matching rule > global default.
 
 Annotations, not labels: SecObserve names like `Shop Prod` contain spaces, label values cannot.

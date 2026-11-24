@@ -38,7 +38,9 @@ class NamespaceRule:
     """Central mapping for groups of namespaces, e.g. all infrastructure namespaces into their own product group.
 
     The first rule whose regex matches the whole namespace name wins. A field that is not set (None) falls back to
-    the global default; namespace annotations still override everything.
+    the global default; namespace annotations still override everything. Named groups of the regex are additional
+    template fields for product and branch: ``(?P<project>.+)-(?P<env>prod|staging)`` with product ``{project}``
+    and branch ``{env}`` puts shop-prod and shop-staging into one product "shop" with the branches prod and staging.
     """
 
     match: str
@@ -47,7 +49,18 @@ class NamespaceRule:
     branch: str | None = None  # template, like BRANCH_NAME_TEMPLATE
 
     def matches(self, namespace: str) -> bool:
-        return re.fullmatch(self.match, namespace) is not None
+        return self.groups(namespace) is not None
+
+    def groups(self, namespace: str) -> dict[str, str] | None:
+        """The named groups for a namespace this rule matches (unmatched optional groups are ""), else None."""
+        match = re.fullmatch(self.match, namespace)
+        if match is None:
+            return None
+        return {key: value or "" for key, value in match.groupdict().items()}
+
+    @property
+    def group_names(self) -> tuple[str, ...]:
+        return tuple(re.compile(self.match).groupindex)
 
 
 _RULE_KEYS = {"match": "match", "product": "product", "productGroup": "product_group", "branch": "branch"}
@@ -72,9 +85,12 @@ def _rules(name: str) -> tuple[NamespaceRule, ...]:
             if value is not None and not isinstance(value, str):
                 raise ValueError(f"{name}[{i}].{key} must be a string")
         try:
-            re.compile(item["match"])
+            pattern = re.compile(item["match"])
         except re.error as exc:
             raise ValueError(f"{name}[{i}]: invalid regex {item['match']!r}: {exc}") from exc
+        for group in pattern.groupindex:
+            if not re.fullmatch(r"[a-z_][a-z0-9_]*", group):
+                raise ValueError(f"{name}[{i}]: group name {group!r} must be lowercase letters, digits and _")
         rules.append(NamespaceRule(**{_RULE_KEYS[key]: value for key, value in item.items()}))
     return tuple(rules)
 
