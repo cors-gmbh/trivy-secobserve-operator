@@ -153,3 +153,45 @@ def test_rule_templates_are_validated(monkeypatch):
     settings = _rule_settings('[{"match": "x", "product": "{secret}"}]', monkeypatch)
     with pytest.raises(ValueError):
         validate_templates(settings)
+
+
+def test_named_groups_put_namespaces_into_one_product(monkeypatch):
+    settings = _rule_settings(
+        '[{"match": "argocd|secobserve", "productGroup": "CORS Infrastruktur"},'
+        ' {"match": "(?P<project>.+)-(?P<env>prod|staging)", "product": "{project}", "branch": "{env}"}]',
+        monkeypatch,
+        PRODUCT_GROUP="Pimcore Installationen",
+    )
+    prod = resolve_target(settings, values(namespace="ske-solar-prod"), {}, {})
+    staging = resolve_target(settings, values(namespace="ske-solar-staging"), {}, {})
+    assert (prod.product, prod.branch, prod.product_group) == ("ske-solar", "prod", "Pimcore Installationen")
+    assert (staging.product, staging.branch) == ("ske-solar", "staging")
+    assert prod.service == staging.service == "app"
+    # no match: namespace as product, no branch
+    other = resolve_target(settings, values(namespace="proofval"), {}, {})
+    assert (other.product, other.branch) == ("proofval", "")
+    # annotations still win
+    annotated = resolve_target(settings, values(namespace="shop-prod"), {}, {"secobserve.io/branch": "live"})
+    assert (annotated.product, annotated.branch) == ("shop", "live")
+    validate_templates(settings)
+
+
+def test_unmatched_optional_group_is_empty(monkeypatch):
+    settings = _rule_settings(
+        '[{"match": "(?P<project>[a-z]+)(-(?P<env>staging))?", "product": "{project}", "branch": "{env}"}]',
+        monkeypatch,
+    )
+    assert resolve_target(settings, values(namespace="shop"), {}, {}).branch == ""
+    assert resolve_target(settings, values(namespace="shop-staging"), {}, {}).branch == "staging"
+
+
+def test_group_names_are_checked(monkeypatch):
+    with pytest.raises(ValueError, match="group name"):
+        _rule_settings('[{"match": "(?P<Project>.+)"}]', monkeypatch)
+    clash = _rule_settings('[{"match": "(?P<namespace>.+)", "product": "{namespace}"}]', monkeypatch)
+    with pytest.raises(ValueError, match="template fields already"):
+        validate_templates(clash)
+    # a group of another rule is not available
+    other = _rule_settings('[{"match": "(?P<project>.+)-prod"}, {"match": "x", "product": "{project}"}]', monkeypatch)
+    with pytest.raises(ValueError, match="Unknown template field"):
+        validate_templates(other)

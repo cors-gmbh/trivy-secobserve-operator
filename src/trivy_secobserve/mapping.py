@@ -99,11 +99,14 @@ def template_values(cluster: str, report_obj: dict[str, Any]) -> dict[str, str]:
 
 
 class _StrictFormatter(string.Formatter):
-    """str.format without attribute/index access, so templates can never reach into Python objects."""
+    """str.format without attribute/index access, so templates can never reach into Python objects.
+
+    Allowed are the TEMPLATE_FIELDS plus the named groups of the matching NAMESPACE_RULES entry (passed in values).
+    """
 
     def get_field(self, field_name: str, args: Any, kwargs: Any) -> Any:
-        if not re.fullmatch(r"[a-z_]+", field_name) or field_name not in TEMPLATE_FIELDS:
-            raise ValueError(f"Unknown template field '{field_name}', allowed: {', '.join(TEMPLATE_FIELDS)}")
+        if not re.fullmatch(r"[a-z_][a-z0-9_]*", field_name) or field_name not in kwargs:
+            raise ValueError(f"Unknown template field '{field_name}', allowed: {', '.join(kwargs)}")
         return kwargs[field_name], field_name
 
 
@@ -116,16 +119,26 @@ def render(template: str, values: dict[str, str]) -> str:
 
 def validate_templates(settings: Settings) -> None:
     dummy = dict.fromkeys(TEMPLATE_FIELDS, "x")
-    templates = [settings.product_name_template, settings.service_name_template, settings.branch_name_template]
-    for rule in settings.namespace_rules:
-        templates += [rule.product or "", rule.branch or ""]
-    for template in templates:
+    for template in (settings.product_name_template, settings.service_name_template, settings.branch_name_template):
         if template:
             render(template, dummy)
+    for rule in settings.namespace_rules:
+        clash = sorted(set(rule.group_names) & set(TEMPLATE_FIELDS))
+        if clash:
+            raise ValueError(f"NAMESPACE_RULES {rule.match!r}: group names {clash} are template fields already")
+        rule_dummy = {**dummy, **dict.fromkeys(rule.group_names, "x")}
+        for template in (rule.product, rule.branch):
+            if template:
+                render(template, rule_dummy)
 
 
-def namespace_rule(settings: Settings, namespace: str) -> NamespaceRule | None:
-    return next((rule for rule in settings.namespace_rules if rule.matches(namespace)), None)
+def namespace_rule(settings: Settings, namespace: str) -> tuple[NamespaceRule | None, dict[str, str]]:
+    """The first matching NAMESPACE_RULES entry and its named groups, or (None, {})."""
+    for rule in settings.namespace_rules:
+        groups = rule.groups(namespace)
+        if groups is not None:
+            return rule, groups
+    return None, {}
 
 
 def namespace_enabled(settings: Settings, namespace: str, ns_labels: dict[str, str], ns_annotations: dict[str, str]):
@@ -150,16 +163,17 @@ def resolve_target(
         return None
 
     # precedence: namespace annotation > first matching NAMESPACE_RULES entry > global default
-    rule = namespace_rule(settings, values["namespace"])
+    rule, groups = namespace_rule(settings, values["namespace"])
+    rule_values = {**values, **groups}
     product_template = rule.product if rule and rule.product is not None else settings.product_name_template
     default_group = rule.product_group if rule and rule.product_group is not None else settings.product_group
     branch_template = rule.branch if rule and rule.branch is not None else settings.branch_name_template
 
-    product = (ns_annotations.get(ANNOTATION_PRODUCT) or "").strip() or render(product_template, values)
+    product = (ns_annotations.get(ANNOTATION_PRODUCT) or "").strip() or render(product_template, rule_values)
     group = (ns_annotations.get(ANNOTATION_PRODUCT_GROUP) or default_group or "").strip()
     branch = (ns_annotations.get(ANNOTATION_BRANCH) or "").strip()
     if not branch and branch_template:
-        branch = render(branch_template, values)
+        branch = render(branch_template, rule_values)
     service = render(settings.service_name_template, values)
 
     if not product or not service:
